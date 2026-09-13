@@ -1,0 +1,15 @@
+# Kustomize packaging: `kubectl apply -k k8s` deploys everything in
+# manifest.yaml into the bellwether namespace (declared in
+# namespace.yaml). The images transformer is where deployments pin an
+# exact build: set newTag to the `sha-<commit>` tag published alongside
+# latest (see the publish workflow) and IfNotPresent stops fighting
+# you over a tag you consider immutable.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: bellwether
+resources:
+  - namespace.yaml
+  - manifest.yaml
+images:
+  - name: ghcr.io/synthluvr/bellwether
+    newTag: latest

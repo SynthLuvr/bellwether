@@ -1,0 +1,10 @@
+# A dedicated namespace keeps the exercise's resources — and any
+# debugging kubectl apply/run experiments — away from anything else
+# living in the cluster. kustomization.yaml stamps this namespace onto
+# every resource in the set.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bellwether
+  labels:
+    app: bellwether

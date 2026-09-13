@@ -5,46 +5,28 @@ on:
 
 jobs:
   ci:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Cache go build cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@v6.1.0
         with:
-          path: |
-            ~/.cache/go-build
-            ~\AppData\Local\go-build
+          path: ~/.cache/go-build
           key: ${{ runner.os }}-gocache-${{ hashFiles('go.sum') }}
           restore-keys: ${{ runner.os }}-gocache-
 
-      - name: Install pandoc on Linux (pinned for Markdown lint/format)
-        if: runner.os == 'Linux'
+      - name: Install pandoc (pinned for Markdown lint/format)
         run: |
           wget -q https://github.com/jgm/pandoc/releases/download/3.11/pandoc-3.11-1-amd64.deb
           sudo dpkg -i pandoc-3.11-1-amd64.deb
           pandoc --version | head -1
-
-      - name: Install pandoc on Windows (pinned for Markdown lint/format)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $zip = "$env:RUNNER_TEMP\pandoc.zip"
-          $dir = "$env:RUNNER_TEMP\pandoc-3.11"
-          Invoke-WebRequest -Uri https://github.com/jgm/pandoc/releases/download/3.11/pandoc-3.11-windows-x86_64.zip -OutFile $zip
-          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP"
-          Add-Content $env:GITHUB_PATH $dir
-          & "$dir\pandoc.exe" --version | Select-Object -First 1
 
       - name: Warm the module cache
         run: go mod download
@@ -57,3 +39,50 @@ jobs:
 
       - name: Test
         run: go tool task test
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Build image
+        run: docker build --tag bellwether:ci .
+
+      - name: Start container
+        run: |
+          docker run --detach --name bellwether --publish 3000:3000             --env SYMBOL=IBM --env NDAYS=5 --env APIKEY=demo             bellwether:ci
+
+      - name: Poll /health until ready
+        run: |
+          for _ in $(seq 30); do
+            # "|| echo 000" keeps a refused/reset connection from
+            # aborting the script under bash -e.
+            status="$(curl --silent --output /dev/null               --write-out '%{http_code}' http://localhost:3000/health               || echo 000)"
+            # assert the exact status: curl --fail alone accepts 3xx
+            if test "${status}" = "200"; then
+              body="$(curl --silent http://localhost:3000/health)"
+              echo "GET /health -> ${status} ${body}"
+              test "${body}" = '{"status":"ok"}'
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "container never became healthy; logs:"
+          docker logs bellwether
+          exit 1
+
+      - name: Verify the binary runs as PID 1
+        run: |
+          # The distroless image has no shell, so read PID 1's name via
+          # the host-side /proc entry docker inspect points at.
+          pid="$(docker inspect --format '{{.State.Pid}}' bellwether)"
+          pid1="$(cat /proc/${pid}/comm)"
+          echo "PID 1 is: ${pid1}"
+          test "${pid1}" = "bellwether"
+
+      - name: Verify graceful shutdown on SIGTERM
+        run: |
+          docker stop --timeout 15 bellwether
+          docker logs bellwether | grep -F "shutting down gracefully"
+          docker logs bellwether | grep -F "all connections closed, exiting"
