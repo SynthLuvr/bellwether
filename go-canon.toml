@@ -1,0 +1,19 @@
+# bellwether local deltas over go-canon's built-in presets.
+# Everything below is optional; delete what you do not tune.
+# Schema is documented in the go-canon README.
+
+[golangci]
+# Deep-merged over go-canon's embedded golangci-lint preset:
+# maps merge recursively, lists and scalars replace, e.g.
+#
+#   [golangci.linters.settings.dupl]
+#   threshold = 200
+
+# [test]
+# coverage-threshold = 80.0
+
+# [dupl]
+# tokens = 150
+
+# [markdown]
+# exclude = ["docs/legacy/*.md"]

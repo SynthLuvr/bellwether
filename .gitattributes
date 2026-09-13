@@ -1,0 +1,3 @@
+# Git for Windows defaults to CRLF on checkout (core.autocrlf),
+# which breaks the LF-enforced gofumpt and pandoc checks.
+* text=auto eol=lf

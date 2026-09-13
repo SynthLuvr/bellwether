@@ -1,0 +1,28 @@
+version: "3"
+
+tasks:
+  build:
+    desc: Compile all packages
+    cmd: go build ./...
+
+  lint:
+    desc: Full static pipeline via go-canon
+    cmd: go tool go-canon lint
+
+  format:
+    desc: Auto-format and auto-fix
+    cmd: go tool go-canon format
+
+  test:
+    desc: Test suite with the coverage gate
+    cmd: go tool go-canon test
+
+  check:
+    desc: Everything — lint plus tests
+    cmds:
+      - task: lint
+      - task: test
+
+  doctor:
+    desc: Diagnose the environment
+    cmd: go tool go-canon doctor
