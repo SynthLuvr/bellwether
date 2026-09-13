@@ -1,0 +1,131 @@
+# bellwether-secret (APIKEY) is not created by this file: build it from
+# the gitignored .env first (see "Kubernetes" in the root README).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bellwether-config
+  labels:
+    app: bellwether
+data:
+  SYMBOL: "MSFT"
+  NDAYS: "7"
+  # Two replicas at a 2h TTL hold the fleet's Alpha Vantage budget at
+  # 2 x 12 = 24 refreshes/day, inside the 25/day free-tier limit (a
+  # single replica could keep the 1h default).
+  CACHE_TTL: "2h"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bellwether
+  labels:
+    app: bellwether
+spec:
+  replicas: 2
+  # Surge one pod at a time and never drop below the old count, so
+  # redeploys and key rotations (secret update + rollout restart) are
+  # zero-downtime; the PDB below keeps voluntary evictions polite too.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: bellwether
+  template:
+    metadata:
+      labels:
+        app: bellwether
+    spec:
+      containers:
+        - name: bellwether
+          # Local runs side-load this image (minikube image load) instead
+          # of pulling it; IfNotPresent keeps Kubernetes off the registry.
+          # Pin deployments with kustomize's images transformer (see
+          # kustomization.yaml) before treating the tag as immutable.
+          image: ghcr.io/synthluvr/bellwether:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            # Go ignores cgroup limits: pin the GC soft limit below the
+            # container's 128Mi memory cap.
+            - name: GOMEMLIMIT
+              value: 100MiB
+          envFrom:
+            # On key collisions the later source wins, so the secret
+            # (APIKEY) deliberately comes last.
+            - configMapRef:
+                name: bellwether-config
+            - secretRef:
+                name: bellwether-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bellwether
+  labels:
+    app: bellwether
+spec:
+  # With two replicas, one may be evicted for node maintenance while
+  # the other keeps serving.
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: bellwether
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bellwether
+  labels:
+    app: bellwether
+spec:
+  type: ClusterIP
+  selector:
+    app: bellwether
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bellwether
+  labels:
+    app: bellwether
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: bellwether.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bellwether
+                port:
+                  name: http
